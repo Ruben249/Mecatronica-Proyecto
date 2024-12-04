@@ -11,7 +11,6 @@ mp_drawing = mp.solutions.drawing_utils
 
 # Configuración MQTT
 mqtt_broker = "test.mosquitto.org"  # Para pruebas rápidas
-  # Dirección del broker MQTT (ajústalo según tu configuración)
 mqtt_port = 1883  # Puerto estándar de MQTT
 mqtt_topic = "gestos/mano"  # El topic donde se enviarán los datos
 
@@ -93,15 +92,6 @@ def detect_hand():
                 # Publicar el número de dedos levantados en el broker MQTT
                 mqtt_client.publish(mqtt_topic, comando)
                 print(f"Publicado en MQTT: {comando}")
-
-        # Mostrar la imagen con las marcas de las manos
-        cv2.imshow('Live Screen Capture', frame)
-
-        # Salir si se presiona 'q'
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     print("Iniciando transmisión...")
