@@ -1,25 +1,42 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-import pyautogui
+import mss
+import pygetwindow as gw
 
 # Inicialización de MediaPipe para la detección de la mano
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
-# Función para capturar la pantalla
-def capture_screen():
-    # Captura de pantalla utilizando pyautogui
-    screenshot = pyautogui.screenshot()
-    # Convertir la captura de pantalla a un array de NumPy (de RGB a BGR)
-    frame = np.array(screenshot)
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    return frame
+# Función para capturar la imagen de la ventana de Chrome con la URL
+def capture_chrome_window():
+    try:
+        # Buscar la ventana de Chrome por su título (puedes ajustar el título si es necesario)
+        window = gw.getWindowsWithTitle('ESP32 OV2460')[0]  # Asumiendo que el título es "ESP32 Camera"
+        if window:
+            # Capturar la región de la ventana de Chrome
+            with mss.mss() as sct:
+                # Definir la región para capturar
+                monitor = {
+                    'top': window.top,
+                    'left': window.left,
+                    'width': window.width,
+                    'height': window.height
+                }
+
+                # Capturar la imagen de la ventana de Chrome
+                screenshot = sct.grab(monitor)
+                # Convertir la imagen a un array de NumPy (de BGRA a BGR)
+                img = np.array(screenshot)
+                img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                return img
+    except Exception as e:
+        print(f"Error al capturar la ventana de Chrome: {e}")
+        return None
 
 # Función para contar los dedos levantados
 def count_raised_fingers(landmarks):
-    # Asumiendo que la muñeca está en el punto 0 y la base del dedo en el 1
     raised_fingers = 0
     
     # Dedo índice (dedo 1, base 0-1)
@@ -46,11 +63,16 @@ def count_raised_fingers(landmarks):
 
 # Función para procesar el video y detectar la mano
 def detect_hand():
-    cv2.namedWindow("Live Screen Capture", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("ESP32 Hand Detection", cv2.WINDOW_AUTOSIZE)
     
     while True:
-        # Obtener la imagen de la captura de pantalla
-        frame = capture_screen()
+        # Obtener la imagen desde la ventana de Chrome
+        frame = capture_chrome_window()
+
+        # Si la imagen no es válida, continuar al siguiente ciclo
+        if frame is None:
+            print("No se pudo obtener una imagen válida desde la ventana de Chrome.")
+            continue
 
         # Convertir el frame a RGB para MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -70,14 +92,14 @@ def detect_hand():
                 if raised_fingers == 0:
                     print("1: Mano cerrada")
                 elif raised_fingers == 1:
-                    print("2: Dos dedos levantados")
+                    print("2: Un dedo levantados")
                 elif raised_fingers == 5:
                     print("3: Mano abierta")
                 else:
                     print("4: Otro gesto o sin mano")
 
         # Mostrar la imagen con las marcas de las manos
-        cv2.imshow('Live Screen Capture', frame)
+        cv2.imshow('ESP32 Hand Detection', frame)
 
         # Salir si se presiona 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
