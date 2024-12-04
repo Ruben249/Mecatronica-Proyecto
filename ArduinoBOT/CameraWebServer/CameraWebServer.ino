@@ -1,36 +1,11 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-
-//
-// WARNING!!! PSRAM IC required for UXGA resolution and high JPEG quality
-//            Ensure ESP32 Wrover Module or other board with PSRAM is selected
-//            Partial images will be transmitted if image exceeds buffer size
-//
-//            You must select partition scheme from the board menu that has at least 3MB APP space.
-//            Face Recognition is DISABLED for ESP32 and ESP32-S2, because it takes up from 15
-//            seconds to process single frame. Face Detection is ENABLED if PSRAM is enabled as well
+#include <PubSubClient.h>  // Librería para MQTT
 
 // ===================
 // Select camera model
 // ===================
-//#define CAMERA_MODEL_WROVER_KIT // Has PSRAM
-//#define CAMERA_MODEL_ESP_EYE  // Has PSRAM
-//#define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_PSRAM // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_V2_PSRAM // M5Camera version B Has PSRAM
 #define CAMERA_MODEL_M5STACK_WIDE // Has PSRAM
-//#define CAMERA_MODEL_M5STACK_ESP32CAM // No PSRAM
-//#define CAMERA_MODEL_M5STACK_UNITCAM // No PSRAM
-//#define CAMERA_MODEL_M5STACK_CAMS3_UNIT  // Has PSRAM
-//#define CAMERA_MODEL_AI_THINKER // Has PSRAM
-//#define CAMERA_MODEL_TTGO_T_JOURNAL // No PSRAM
-//#define CAMERA_MODEL_XIAO_ESP32S3 // Has PSRAM
-// ** Espressif Internal Boards **
-//#define CAMERA_MODEL_ESP32_CAM_BOARD
-//#define CAMERA_MODEL_ESP32S2_CAM_BOARD
-//#define CAMERA_MODEL_ESP32S3_CAM_LCD
-//#define CAMERA_MODEL_DFRobot_FireBeetle2_ESP32S3 // Has PSRAM
-//#define CAMERA_MODEL_DFRobot_Romeo_ESP32S3 // Has PSRAM
 #include "camera_pins.h"
 
 // ===========================
@@ -39,14 +14,29 @@
 const char *ssid = "Redmi10C";
 const char *password = "bichodeguerra";
 
+// Configuración MQTT
+const char* mqtt_server = "test.mosquitto.org";  // Cambia esto por la IP o hostname de tu broker MQTT
+const int mqtt_port = 1883;                    // Puerto estándar de MQTT
+const char* mqtt_topic = "gestos/mano";        // El topic al que se va a suscribir el ESP32
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Variable para almacenar el mensaje recibido
+String mqtt_message = "";
+
+// Funciones
 void startCameraServer();
 void setupLedFlash(int pin);
+void reconnectMQTT();
+void callback(char* topic, byte* payload, unsigned int length);
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200);  // Comunicación serie con el puerto serial
   Serial.setDebugOutput(true);
   Serial.println();
 
+  // Configuración de la cámara
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -68,39 +58,13 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.frame_size = FRAMESIZE_UXGA;
-  config.pixel_format = PIXFORMAT_JPEG;  // for streaming
-  //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
+  config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
   config.fb_count = 1;
 
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  //                      for larger pre-allocated frame buffer.
-  if (config.pixel_format == PIXFORMAT_JPEG) {
-    if (psramFound()) {
-      config.jpeg_quality = 10;
-      config.fb_count = 2;
-      config.grab_mode = CAMERA_GRAB_LATEST;
-    } else {
-      // Limit the frame size when PSRAM is not available
-      config.frame_size = FRAMESIZE_SVGA;
-      config.fb_location = CAMERA_FB_IN_DRAM;
-    }
-  } else {
-    // Best option for face detection/recognition
-    config.frame_size = FRAMESIZE_240X240;
-#if CONFIG_IDF_TARGET_ESP32S3
-    config.fb_count = 2;
-#endif
-  }
-
-#if defined(CAMERA_MODEL_ESP_EYE)
-  pinMode(13, INPUT_PULLUP);
-  pinMode(14, INPUT_PULLUP);
-#endif
-
-  // camera init
+  // Inicialización de la cámara
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -108,42 +72,30 @@ void setup() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
   if (s->id.PID == OV3660_PID) {
-    s->set_vflip(s, 1);        // flip it back
-    s->set_brightness(s, 1);   // up the brightness just a bit
-    s->set_saturation(s, -2);  // lower the saturation
+    s->set_vflip(s, 1);
+    s->set_brightness(s, 1);
+    s->set_saturation(s, -2);
   }
-  // drop down frame size for higher initial frame rate
   if (config.pixel_format == PIXFORMAT_JPEG) {
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
 
-#if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
-  s->set_vflip(s, 1);
-  s->set_hmirror(s, 1);
-#endif
-
-#if defined(CAMERA_MODEL_ESP32S3_EYE)
-  s->set_vflip(s, 1);
-#endif
-
-// Setup LED FLash if LED pin is defined in camera_pins.h
-#if defined(LED_GPIO_NUM)
-  setupLedFlash(LED_GPIO_NUM);
-#endif
-
+  // Conexión Wi-Fi
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
-
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
   Serial.println("WiFi connected");
 
+  // Inicialización del servidor web de la cámara
   startCameraServer();
+  
+  // Configuración MQTT
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
 
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
@@ -151,6 +103,50 @@ void setup() {
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  // Reconectar a MQTT si se pierde la conexión
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
+  client.loop();  // Mantener el cliente MQTT activo
+
+  // Enviar el mensaje recibido a través de la conexión serie
+  if (mqtt_message != "") {
+    Serial.print("Mensaje MQTT recibido: ");
+    Serial.println(mqtt_message);  // Mostrar el mensaje recibido en el puerto serie
+
+    // Enviar el mensaje a Arduino por puerto serie
+    Serial.println(mqtt_message);  // Lo que recibe el ESP32 se pasa al Arduino
+    
+    mqtt_message = "";  // Limpiar el mensaje después de enviarlo
+  }
+
+  delay(100);
+}
+
+// Función de reconexión MQTT
+void reconnectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    if (client.connect("ESP32Cam")) {
+      Serial.println("connected");
+      client.subscribe(mqtt_topic);  // Nos suscribimos al topic
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      delay(5000);  // Intentar de nuevo después de 5 segundos
+    }
+  }
+}
+
+// Función de callback para manejar los mensajes MQTT recibidos
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.print("Mensaje recibido: ");
+  Serial.println(message);
+
+  // Almacenar el mensaje recibido en la variable mqtt_message
+  mqtt_message = message;
 }
