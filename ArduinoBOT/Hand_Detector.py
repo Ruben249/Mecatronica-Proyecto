@@ -80,13 +80,25 @@ def detect_hand():
                     print("1: Mano cerrada")
                     comando = "a"
 
-                elif raised_fingers >=3:
+                elif raised_fingers >= 3:
                     print("2: Mano abierta")
                     comando = "b"
 
                 # Publicar el número de dedos levantados en el broker MQTT
                 mqtt_client.publish(mqtt_topic, comando)
                 print(f"Publicado en MQTT: {comando}")
+        else:
+            # Si no se detecta ninguna mano, publicar un mensaje específico
+            comando = "c"
+            mqtt_client.publish(mqtt_topic, comando)
+            print("Publicado en MQTT: No se detecta ninguna mano")
+
+        # Salir si se presiona la tecla 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Liberar recursos
+    cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     print("Iniciando transmisión...")
