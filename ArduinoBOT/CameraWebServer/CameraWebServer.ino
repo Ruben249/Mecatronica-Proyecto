@@ -32,7 +32,8 @@ void reconnectMQTT();
 void callback(char* topic, byte* payload, unsigned int length);
 
 void setup() {
-  Serial.begin(115200);  // Comunicación serie con el puerto serial
+  Serial.begin(9600);  // Comunicación serie con el monitor serial
+  Serial2.begin(9600, SERIAL_8N1, 33, 4); // Comunicación serie con el Arduino
   Serial.setDebugOutput(true);
   Serial.println();
 
@@ -109,14 +110,9 @@ void loop() {
   }
   client.loop();  // Mantener el cliente MQTT activo
 
-  // Enviar el mensaje recibido a través de la conexión serie
+  // Enviar el mensaje recibido a través de la conexión serie al Arduino
   if (mqtt_message != "") {
-    Serial.print("Mensaje MQTT recibido: ");
-    Serial.println(mqtt_message);  // Mostrar el mensaje recibido en el puerto serie
-
-    // Enviar el mensaje a Arduino por puerto serie
-    Serial.println(mqtt_message);  // Lo que recibe el ESP32 se pasa al Arduino
-    
+    Serial2.println(mqtt_message); // Enviar mensaje al Arduino por Serial2
     mqtt_message = "";  // Limpiar el mensaje después de enviarlo
   }
 
@@ -144,7 +140,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
-  Serial.print("Mensaje recibido: ");
+  Serial.print("Mensaje MQTT recibido: ");
   Serial.println(message);
 
   // Almacenar el mensaje recibido en la variable mqtt_message
